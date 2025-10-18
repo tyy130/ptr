@@ -1,43 +1,38 @@
-use eframe::{egui, Frame, App, NativeOptions, IconData};
+use eframe::{egui, Frame, App, NativeOptions};
 use crate::config::Config;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use std::fs::File;
-use std::io::Read;
 use image::io::Reader as ImageReader;
-use image::GenericImageView;
 // anyhow::Error not used directly here
 
 pub fn run_gui() {
     // Try to load an icon from assets/extension.ico or assets/extension-256.png
-    let mut options = NativeOptions::default();
+    let options = NativeOptions::default();
     // If user provided a source image but no generated icons, create them here.
     let _ = std::fs::create_dir_all("assets");
     if !std::path::Path::new("assets/extension-256.png").exists() {
         if std::path::Path::new("assets/source.png").exists() {
             // generate multiple sizes from source.png
-            if let Ok(src) = ImageReader::open("assets/source.png").and_then(|r| r.decode()) {
-                use image::imageops::FilterType;
-                let sizes = [16, 24, 32, 48, 64, 128, 256];
-                for &s in &sizes {
-                    let img = src.resize_exact(s, s, FilterType::Lanczos3).to_rgba8();
-                    let _ = img.save(format!("assets/extension-{}.png", s));
-                }
+            match ImageReader::open("assets/source.png") {
+                Ok(reader) => match reader.decode() {
+                    Ok(src) => {
+                    use image::imageops::FilterType;
+                    let sizes = [16, 24, 32, 48, 64, 128, 256];
+                    for &s in &sizes {
+                        let img = src.resize_exact(s, s, FilterType::Lanczos3).to_rgba8();
+                        let _ = img.save(format!("assets/extension-{}.png", s));
+                    }
+                    }
+                    Err(e) => eprintln!("failed to decode assets/source.png: {}", e),
+                },
+                Err(e) => eprintln!("failed to open assets/source.png: {}", e),
             }
         }
     }
-
-    if let Ok(mut f) = File::open("assets/extension.ico") {
-        let mut buf = vec![];
-        if f.read_to_end(&mut buf).is_ok() {
-            options.icon_data = Some(IconData { rgba: buf, width: 256, height: 256 });
-        }
-    } else if let Ok(img) = ImageReader::open("assets/extension-256.png").and_then(|r| r.decode()) {
-        let rgba = img.to_rgba8();
-        let (w, h) = img.dimensions();
-        options.icon_data = Some(IconData { rgba: rgba.into_raw(), width: w as usize, height: h as usize });
-    }
+    // Note: we no longer set a custom window icon via NativeOptions here because
+    // the eframe API for icons may differ between platforms. If desired we can
+    // set the icon later with platform-specific APIs.
 
     let _ = eframe::run_native(
         "Third-Party Extension Installer",
@@ -185,7 +180,7 @@ impl App for GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("PowerToys Run Plugin Manager (GUI)");
-                ui.with_layout(egui::Layout::right_to_left(), |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                     if ui.button("Plugins List").clicked() {
                         // toggle a simple state value by updating message
                         // we store 'plugins' view state in message for small change
@@ -230,11 +225,9 @@ impl App for GuiApp {
                                 ui.label(p.author);
                                 ui.add(egui::Label::new(p.description).wrap(true).sense(egui::Sense::hover()));
                                 if ui.button("Download ZIP").clicked() {
-                                    // attempt main zip then master then repo page
+                                    // attempt main zip; user can fallback to repo page if needed
                                     let main_zip = format!("{}/archive/refs/heads/main.zip", p.repo);
-                                    let master_zip = format!("{}/archive/refs/heads/master.zip", p.repo);
                                     Self::open_url(&main_zip);
-                                    // Note: webbrowser will open whichever URL; GUI can't check status synchronously
                                 }
                                 if ui.button("Install").clicked() {
                                     // Normalize repo to owner/repo
